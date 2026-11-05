@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import worker from './index.mjs';
 import { handleProxy } from './proxy.mjs';
 
 const ORIGIN = 'https://phanpy.example.workers.dev';
@@ -994,4 +995,66 @@ test('unfollowing someone asks Micro.blog and reports the new state', async () =
   );
   assert.equal((await res.json()).following, false);
   assert.equal(calls[0].key, 'POST /users/unfollow');
+});
+
+const signIn = (fetch, allowedUsers) =>
+  handleProxy(
+    request('/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'code=c1',
+    }),
+    { fetch, allowedUsers },
+  );
+
+const signInRoutes = (username) => ({
+  'POST /indieauth/token': { access_token: 'SECRET-MINTED' },
+  'POST /account/verify': { username },
+});
+
+test('sign-in refuses a user who is not on the allowlist', async () => {
+  const { fetch } = stubUpstream(signInRoutes('stranger'));
+  const res = await signIn(fetch, 'nighthawk,manton');
+  assert.equal(res.status, 403);
+  assert.ok(!(await res.text()).includes('SECRET-MINTED'));
+});
+
+test('sign-in lets in allowlisted users, ignoring case and spaces', async () => {
+  for (const username of ['nighthawk', 'Manton']) {
+    const { fetch } = stubUpstream(signInRoutes(username));
+    const res = await signIn(fetch, ' nighthawk , manton ');
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).access_token, 'SECRET-MINTED');
+  }
+});
+
+test('sign-in withholds the token when the user cannot be verified', async () => {
+  const { fetch } = stubUpstream({
+    'POST /indieauth/token': { access_token: 'SECRET-MINTED' },
+  });
+  const res = await signIn(fetch, 'nighthawk');
+  assert.notEqual(res.status, 200);
+  assert.ok(!(await res.text()).includes('SECRET-MINTED'));
+});
+
+test('sign-in is open when no allowlist is set', async () => {
+  const { fetch } = stubUpstream(signInRoutes('anyone'));
+  for (const allowedUsers of [undefined, '', ' , ']) {
+    const res = await signIn(fetch, allowedUsers);
+    assert.equal(res.status, 200);
+  }
+});
+
+test('the Worker takes the allowlist from its environment', async (t) => {
+  const { fetch } = stubUpstream(signInRoutes('stranger'));
+  t.mock.method(globalThis, 'fetch', fetch);
+  const res = await worker.fetch(
+    request('/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'code=c1',
+    }),
+    { MICROBLOG_ALLOWED_USERS: 'nighthawk' },
+  );
+  assert.equal(res.status, 403);
 });

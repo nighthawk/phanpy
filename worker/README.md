@@ -35,6 +35,10 @@ npm run build
 npx wrangler deploy
 ```
 
+Set `MICROBLOG_ALLOWED_USERS` in `wrangler.jsonc` to the Micro.blog usernames that may
+sign in, separated by commas, or leave it empty to allow anyone. It doesn't affect
+Mastodon accounts.
+
 ## Known limits
 
 - Thread nesting is inferred from mentions, because Micro.blog has no reply-to data.
@@ -50,3 +54,5 @@ npx wrangler deploy
 - Bookmarks of fediverse or external-blog posts open without their thread.
 - Profiles only page back about 400 posts, and deep pages load slowly.
 - Signing out doesn't revoke the token. Do that in your Micro.blog account settings.
+- The allowlist is only checked at sign-in, and someone it refuses sees no message.
+  Their new token also stays valid until they revoke it in those settings.

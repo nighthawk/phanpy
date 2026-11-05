@@ -434,7 +434,19 @@ function authorizeRedirect(url) {
   return { status: 302, headers: { Location: target.href } };
 }
 
-async function exchangeToken(fetch, fields) {
+// Checked at sign-in only, as checking every request would add a round trip to
+// Micro.blog. An empty list lets anyone in.
+async function isAllowedUser(fetch, token, allowedUsers = '') {
+  const allowed = allowedUsers
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (!allowed.length) return true;
+  const username = await verifiedUsername(makeClient(fetch, token), token);
+  return allowed.includes(username.toLowerCase());
+}
+
+async function exchangeToken(fetch, fields, allowedUsers) {
   const { code, client_id, redirect_uri, code_verifier } = fields;
   const res = await fetch(`${UPSTREAM}/indieauth/token`, {
     method: 'POST',
@@ -452,6 +464,15 @@ async function exchangeToken(fetch, fields) {
   });
   const json = await res.json();
   if (!res.ok) return { status: res.status, body: json };
+  if (!(await isAllowedUser(fetch, json.access_token, allowedUsers))) {
+    return {
+      status: 403,
+      body: {
+        error: 'access_denied',
+        error_description: 'This account is not allowed on this server.',
+      },
+    };
+  }
   return {
     body: {
       access_token: json.access_token,
@@ -484,7 +505,7 @@ function instanceInfo(host) {
   };
 }
 
-async function route(request, url, fetch, kv) {
+async function route(request, url, fetch, kv, allowedUsers) {
   const { pathname, origin, host } = url;
   const { method } = request;
   const token =
@@ -530,7 +551,7 @@ async function route(request, url, fetch, kv) {
   }
   if (pathname === '/oauth/authorize') return authorizeRedirect(url);
   if (pathname === '/oauth/token' && method === 'POST') {
-    return exchangeToken(fetch, fields);
+    return exchangeToken(fetch, fields, allowedUsers);
   }
   // Micro.blog has no revoke endpoint I could find, so tokens stay valid until
   // revoked in its account settings.
@@ -651,7 +672,7 @@ const isProxied = (pathname) =>
 // Returns null for anything that belongs to the static app.
 export async function handleProxy(
   request,
-  { fetch = globalThis.fetch, kv } = {},
+  { fetch = globalThis.fetch, kv, allowedUsers } = {},
 ) {
   const url = new URL(request.url);
   if (!isProxied(url.pathname)) return null;
@@ -664,7 +685,7 @@ export async function handleProxy(
       status = 200,
       body,
       headers = {},
-    } = await route(request, url, fetch, kv);
+    } = await route(request, url, fetch, kv, allowedUsers);
     return new Response(body === undefined ? null : JSON.stringify(body), {
       status,
       headers: { ...baseHeaders, ...headers },

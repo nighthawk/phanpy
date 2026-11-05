@@ -10,5 +10,7 @@
   },
   // Wrangler creates this on the first deploy and writes its ID back here.
   "kv_namespaces": [{ "binding": "MICROBLOG_KV" }],
+  // Micro.blog usernames allowed to sign in, comma-separated. Empty allows anyone.
+  "vars": { "MICROBLOG_ALLOWED_USERS": "nighthawk,manton" },
   "previews": {},
 }
