@@ -21,10 +21,17 @@
   display: none !important;
 }
 
-/* Post and profile menus: muting, blocking and reporting aren't supported. */
-.szh-menu__item:has(> .icon[data-icon='mute']),
-.szh-menu__item:has(> .icon[data-icon='block']),
-.szh-menu__item:has(> .icon[data-icon='flag']) {
+/*
+  Post and profile menus: muting, blocking, reporting and pinning aren't supported.
+  Deleting returns when the proxy supports it.
+*/
+.szh-menu__item:has(.icon[data-icon='mute']),
+.szh-menu__item:has(.icon[data-icon='unmute']),
+.szh-menu__item:has(.icon[data-icon='block']),
+.szh-menu__item:has(.icon[data-icon='flag']),
+.szh-menu__item:has(.icon[data-icon='pin']),
+.szh-menu__item:has(.icon[data-icon='unpin']),
+.szh-menu__item:has(.icon[data-icon='trash']) {
   display: none !important;
 }
 
