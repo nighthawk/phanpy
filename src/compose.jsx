@@ -14,12 +14,14 @@ import ComposeSuspense from './components/compose-suspense';
 import { IconSpriteProvider } from './components/icon-sprite-manager';
 import Loader from './components/loader';
 import { initActivateLang } from './utils/lang';
+import { updateMicroblogClass } from './utils/microblog-account';
 import { initPWAViewport } from './utils/pwa-viewport';
 import { initStates } from './utils/states';
 import { getCurrentAccount } from './utils/store-utils';
 import useTitle from './utils/useTitle';
 
 initActivateLang();
+updateMicroblogClass();
 initPWAViewport();
 
 if (window.opener) {

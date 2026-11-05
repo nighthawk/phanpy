@@ -69,6 +69,7 @@ import {
 import { getAccessToken } from './utils/auth';
 import { AuthProvider, useAuth } from './utils/auth-context';
 import focusDeck from './utils/focus-deck';
+import { updateMicroblogClass } from './utils/microblog-account';
 import { initSubscription } from './utils/push-notifications';
 import states, { hideAllModals, initStates, statusKey } from './utils/states';
 import store from './utils/store';
@@ -476,6 +477,7 @@ function App() {
           ]);
           initStates();
           window.__IGNORE_GET_ACCOUNT_ERROR__ = true;
+          updateMicroblogClass();
 
           setIsLoggedIn(true);
           setUIState('default');

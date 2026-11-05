@@ -15,11 +15,13 @@ import { HashRouter } from 'react-router-dom';
 import { App } from './app';
 import { IconSpriteProvider } from './components/icon-sprite-manager';
 import { initActivateLang } from './utils/lang';
+import { updateMicroblogClass } from './utils/microblog-account';
 import { initPWAViewport } from './utils/pwa-viewport';
 import states from './utils/states';
 
 initActivateLang();
 initPWAViewport();
+updateMicroblogClass();
 
 if (import.meta.env.DEV) {
   import('preact/debug');

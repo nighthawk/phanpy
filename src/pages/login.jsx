@@ -17,6 +17,7 @@ import {
   registerApplication,
 } from '../utils/auth';
 import { openAuthPopup, watchAuthPopup } from '../utils/auth-popup';
+import { resolveLoginInstance } from '../utils/microblog';
 import { supportsPKCE } from '../utils/oauth-pkce';
 import store from '../utils/store';
 import {
@@ -26,7 +27,7 @@ import {
 } from '../utils/store-utils';
 import useTitle from '../utils/useTitle';
 
-const DEFAULT_INSTANCE = location.host;
+const { PHANPY_DEFAULT_INSTANCE: DEFAULT_INSTANCE } = import.meta.env;
 
 function Login() {
   const { t } = useLingui();
@@ -35,9 +36,8 @@ function Login() {
   const cachedInstanceURL = store.local.get('instanceURL');
   const [uiState, setUIState] = useState('default');
   const [searchParams] = useSearchParams();
-  // There's only one server, so sign-in never needs to ask which.
-  const instance = searchParams.get('instance') || DEFAULT_INSTANCE;
-  const submit = true;
+  const instance = searchParams.get('instance');
+  const submit = searchParams.get('submit');
   const [instanceText, setInstanceText] = useState(
     instance || cachedInstanceURL?.toLowerCase() || '',
   );
@@ -64,8 +64,9 @@ function Login() {
   //   }
   // }, []);
 
-  const submitInstance = (instanceURL) => {
-    if (!instanceURL) return;
+  const submitInstance = (enteredInstanceURL) => {
+    if (!enteredInstanceURL) return;
+    let instanceURL = resolveLoginInstance(enteredInstanceURL, location.host);
 
     (async () => {
       // WEB_DOMAIN vs LOCAL_DOMAIN negotiation time
@@ -296,6 +297,16 @@ function Login() {
               : t`Continue`}
           </button>{' '}
         </div>
+        <p>
+          <button
+            type="button"
+            class="plain2"
+            disabled={uiState === 'loading'}
+            onClick={() => submitInstance(location.host)}
+          >
+            Continue with Micro.blog
+          </button>
+        </p>
         <Loader hidden={uiState !== 'loading'} />
         <hr />
         {!DEFAULT_INSTANCE && (

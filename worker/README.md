@@ -1,14 +1,16 @@
 # Micro.blog proxy
 
-This unofficial fork runs [Phanpy](https://github.com/cheeaun/phanpy) as a
-Micro.blog client. Report problems here, not to Phanpy's maintainer.
+This unofficial fork of [Phanpy](https://github.com/cheeaun/phanpy) adds Micro.blog
+accounts. Mastodon accounts work as usual and can be used alongside them. Report
+problems here, not to Phanpy's maintainer.
 
 Micro.blog doesn't offer the Mastodon client API that Phanpy is built on, so this
 Cloudflare Worker presents that API and calls Micro.blog's own API behind it. The
 same Worker serves the app, so both share one hostname.
 
 Every user's Micro.blog token passes through the Worker. It keeps no state between
-requests and must never log tokens, sign-in codes or query strings.
+requests and must never log tokens, sign-in codes or query strings. Mastodon accounts
+talk to their own servers directly, so their tokens never reach it.
 
 ## Tests
 

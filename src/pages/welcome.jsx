@@ -20,8 +20,10 @@ import states from '../utils/states';
 import useTitle from '../utils/useTitle';
 
 const {
+  PHANPY_DEFAULT_INSTANCE: DEFAULT_INSTANCE,
   PHANPY_WEBSITE: WEBSITE,
   PHANPY_PRIVACY_POLICY_URL: PRIVACY_POLICY_URL,
+  PHANPY_DEFAULT_INSTANCE_REGISTRATION_URL: DEFAULT_INSTANCE_REGISTRATION_URL,
 } = import.meta.env;
 const appSite = WEBSITE
   ? WEBSITE.replace(/https?:\/\//g, '').replace(/\/$/, '')
@@ -47,13 +49,38 @@ function Welcome() {
             <img src={logoText} alt="Phanpy" width="180" height="52" />
           </h1>
           <p class="desc">
-            An unofficial Micro.blog client, forked from Phanpy.
+            A client for Micro.blog and Mastodon, forked from Phanpy.
           </p>
           <p>
-            <Link to="/login" class="button plain6">
+            <Link
+              to={
+                DEFAULT_INSTANCE
+                  ? `/login?instance=${DEFAULT_INSTANCE}&submit=1`
+                  : '/login'
+              }
+              class="button plain6"
+            >
               {t`Log in`}
             </Link>
           </p>
+          {DEFAULT_INSTANCE && DEFAULT_INSTANCE_REGISTRATION_URL && (
+            <p>
+              <a href={DEFAULT_INSTANCE_REGISTRATION_URL} class="button plain5">
+                <Trans>Sign up</Trans>
+              </a>
+            </p>
+          )}
+          {!DEFAULT_INSTANCE && (
+            <p class="insignificant">
+              <small>
+                <Trans>
+                  Connect your existing Mastodon/Fediverse account.
+                  <br />
+                  Your credentials are not stored on this server.
+                </Trans>
+              </small>
+            </p>
+          )}
         </div>
       </div>
       <div id="device-showcase">
