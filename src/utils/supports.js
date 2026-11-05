@@ -10,17 +10,10 @@ const notContainPixelfed = /^(?!.*pixelfed).*$/i;
 const containPleroma = /pleroma/i;
 const containAkkoma = /akkoma/i;
 const containGTS = /gotosocial/i;
+// Features left out here count as unsupported, which is how Micro.blog's gaps are hidden.
 const platformFeatures = {
-  '@mastodon/lists': notContainPixelfed,
-  '@mastodon/filters': notContainPixelfed,
   '@mastodon/mentions': notContainPixelfed,
-  '@mastodon/trending-hashtags': notContainPixelfed,
-  '@mastodon/trending-links': notContainPixelfed,
   '@mastodon/post-bookmark': notContainPixelfed,
-  '@mastodon/post-edit': notContainPixelfed,
-  '@mastodon/profile-edit': notContainPixelfed,
-  '@mastodon/profile-private-note': notContainPixelfed,
-  '@mastodon/pinned-posts': notContainPixelfed,
   '@pixelfed/trending': containPixelfed,
   '@pixelfed/home-include-reblogs': containPixelfed,
   '@pixelfed/global-feed': containPixelfed,

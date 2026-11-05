@@ -46,10 +46,7 @@ const request = (path, { token, ...init } = {}) =>
 test('leaves app paths for the static assets', async () => {
   const { fetch } = stubUpstream();
   assert.equal(await handleProxy(request('/'), { fetch }), null);
-  assert.equal(
-    await handleProxy(request('/assets/main.js'), { fetch }),
-    null,
-  );
+  assert.equal(await handleProxy(request('/assets/main.js'), { fetch }), null);
   assert.equal(
     await handleProxy(request('/.well-known/host-meta'), { fetch }),
     null,
@@ -106,7 +103,10 @@ test('authorize redirects to IndieAuth with PKCE and supported scopes', async ()
   });
   assert.equal(res.status, 302);
   const target = new URL(res.headers.get('Location'));
-  assert.equal(target.origin + target.pathname, 'https://micro.blog/indieauth/auth');
+  assert.equal(
+    target.origin + target.pathname,
+    'https://micro.blog/indieauth/auth',
+  );
   assert.equal(target.searchParams.get('client_id'), `${ORIGIN}/`);
   assert.equal(target.searchParams.get('code_challenge'), 'abc');
   assert.equal(target.searchParams.get('scope'), 'read write follow');
@@ -160,7 +160,10 @@ test('home timeline maps paging and adds a next link', async () => {
     { fetch },
   );
   const body = await res.json();
-  assert.deepEqual(body.map((s) => s.account.acct), ['ann', 'bob']);
+  assert.deepEqual(
+    body.map((s) => s.account.acct),
+    ['ann', 'bob'],
+  );
   assert.equal(calls[0].url.searchParams.get('count'), '2');
   assert.equal(calls[0].url.searchParams.get('before_id'), '10');
   assert.equal(calls[0].init.headers.Authorization, 'Bearer tok');
@@ -179,7 +182,10 @@ test('an upstream 401 reaches Phanpy as a 401', async () => {
 });
 
 test('a status and its context come from the conversation', async () => {
-  const items = [post(2, 'bob', '<p><a href="x">@ann</a> yes</p>'), post(1, 'ann')];
+  const items = [
+    post(2, 'bob', '<p><a href="x">@ann</a> yes</p>'),
+    post(1, 'ann'),
+  ];
   const { fetch } = stubUpstream({
     'GET /posts/conversation': { items },
   });
@@ -188,7 +194,10 @@ test('a status and its context come from the conversation', async () => {
   const context = await handleProxy(request('/api/v1/statuses/2/context'), {
     fetch,
   });
-  assert.deepEqual((await context.json()).ancestors.map((s) => s.id), ['1']);
+  assert.deepEqual(
+    (await context.json()).ancestors.map((s) => s.id),
+    ['1'],
+  );
 });
 
 test('notifications present mentions and honour type filters', async () => {
@@ -211,7 +220,10 @@ test('notifications present mentions and honour type filters', async () => {
 
 test('replying returns the created post found in the conversation', async () => {
   const before = [post(1, 'ann')];
-  const after = [post(2, 'me', '<p>Hi</p>', { is_deletable: true }), post(1, 'ann')];
+  const after = [
+    post(2, 'me', '<p>Hi</p>', { is_deletable: true }),
+    post(1, 'ann'),
+  ];
   let replied = false;
   const { fetch, calls } = stubUpstream({
     'GET /posts/conversation': () => ({ items: replied ? after : before }),
@@ -280,7 +292,9 @@ test("one user's bookmark listing never answers another user's request", async (
         : { items: [] },
     'GET /posts/conversation': { items: [] },
   });
-  await handleProxy(request('/api/v1/bookmarks', { token: 'alice' }), { fetch });
+  await handleProxy(request('/api/v1/bookmarks', { token: 'alice' }), {
+    fetch,
+  });
   const res = await handleProxy(
     request('/api/v1/statuses/55', { token: 'bob' }),
     { fetch },
@@ -297,7 +311,11 @@ test('tokens and sign-in codes never reach the logs', async () => {
       'POST /indieauth/token': { access_token: 'SECRET-MINTED' },
       'GET /posts/timeline': () => new Response('No', { status: 500 }),
       'POST /account/verify': { username: 'ann' },
-      'GET /posts/ann': { items: [], author: {}, _microblog: { username: 'ann' } },
+      'GET /posts/ann': {
+        items: [],
+        author: {},
+        _microblog: { username: 'ann' },
+      },
     });
     await handleProxy(
       request('/oauth/token', {
@@ -308,7 +326,9 @@ test('tokens and sign-in codes never reach the logs', async () => {
       { fetch },
     );
     await handleProxy(
-      request('/oauth/authorize?client_id=a&redirect_uri=b&code_challenge=SECRET-CHALLENGE'),
+      request(
+        '/oauth/authorize?client_id=a&redirect_uri=b&code_challenge=SECRET-CHALLENGE',
+      ),
       { fetch },
     );
     await handleProxy(
@@ -322,7 +342,10 @@ test('tokens and sign-in codes never reach the logs', async () => {
   } finally {
     Object.assign(console, originals);
   }
-  assert.deepEqual(logged.filter((line) => line.includes('SECRET')), []);
+  assert.deepEqual(
+    logged.filter((line) => line.includes('SECRET')),
+    [],
+  );
 });
 
 test('unknown API reads get an empty list and writes are refused', async () => {
@@ -541,7 +564,9 @@ test('a reply already published still succeeds if reading it back fails', async 
   let replied = false;
   const { fetch, calls } = stubUpstream({
     'GET /posts/conversation': () =>
-      replied ? new Response('Down', { status: 500 }) : { items: [post(1, 'ann')] },
+      replied
+        ? new Response('Down', { status: 500 })
+        : { items: [post(1, 'ann')] },
     'POST /posts/reply': () => {
       replied = true;
       return {};

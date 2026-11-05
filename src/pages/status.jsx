@@ -53,7 +53,7 @@ import useTitle from '../utils/useTitle';
 
 import getInstanceStatusURL from './../utils/get-instance-status-url';
 
-const { PHANPY_DEFAULT_INSTANCE: DEFAULT_INSTANCE } = import.meta.env;
+const DEFAULT_INSTANCE = location.host;
 
 const LIMIT = 40;
 const SUBCOMMENTS_OPEN_ALL_LIMIT = 10;

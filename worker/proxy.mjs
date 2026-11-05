@@ -80,7 +80,11 @@ function pageResponse(items, url, convert = toStatus) {
 async function feedResponse(client, path, url, convert) {
   const query = feedQuery(url.searchParams);
   const feed = await client.call(query ? `${path}?${query}` : path);
-  return pageResponse(pageItems(feed.items ?? [], url.searchParams), url, convert);
+  return pageResponse(
+    pageItems(feed.items ?? [], url.searchParams),
+    url,
+    convert,
+  );
 }
 
 // Profile feeds ignore before_id, so older pages can only be reached by fetching
@@ -128,7 +132,9 @@ async function findStatus(client, token, id) {
   const items = await conversation(client, id);
   const found = toThreadStatus(items, id, STATUS_OPTIONS);
   if (found || !token) return found;
-  const feed = await client.call(`/posts/bookmarks?before_id=${BigInt(id) + 1n}`);
+  const feed = await client.call(
+    `/posts/bookmarks?before_id=${BigInt(id) + 1n}`,
+  );
   const bookmark = feed.items?.find((item) => item.id === id);
   return bookmark && toStatus(bookmark, STATUS_OPTIONS);
 }
@@ -168,10 +174,11 @@ async function readBackReply(client, token, parentId, known, response, text) {
   }
   let author = {};
   try {
-    const { display_name: name, avatar, username } = await verifyCredentials(
-      client,
-      token,
-    );
+    const {
+      display_name: name,
+      avatar,
+      username,
+    } = await verifyCredentials(client, token);
     author = { name, avatar, _microblog: { username } };
   } catch (error) {
     console.error(`Reading the reply's author failed: ${error.message}`);
@@ -361,7 +368,9 @@ async function route(request, url, fetch) {
   if (pathname === '/api/v1/statuses' && method === 'POST') {
     return createReply(client, token, fields);
   }
-  const bookmark = pathname.match(/^\/api\/v1\/statuses\/(\d+)\/(un)?bookmark$/);
+  const bookmark = pathname.match(
+    /^\/api\/v1\/statuses\/(\d+)\/(un)?bookmark$/,
+  );
   if (bookmark && method === 'POST') {
     return setBookmark(client, token, bookmark[1], !bookmark[2]);
   }
@@ -399,7 +408,9 @@ async function route(request, url, fetch) {
       return { body: toContext(items, status[1], STATUS_OPTIONS) };
     }
     const found = await findStatus(client, token, status[1]);
-    return found ? { body: found } : { status: 404, body: { error: 'Not found' } };
+    return found
+      ? { body: found }
+      : { status: 404, body: { error: 'Not found' } };
   }
 
   // Features Micro.blog lacks read as empty, and writes fail visibly.

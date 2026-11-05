@@ -20,16 +20,12 @@ These need no dependencies and don't touch the network.
 
 ## Deploy your own
 
-Replace `HOST` with your Worker's hostname, such as
-`phanpy.yourname.workers.dev`. The hostname is built into the app, so build again
-if it changes.
-
 ```bash
 npm ci
 ```
 
 ```bash
-PHANPY_WEBSITE=https://HOST PHANPY_DEFAULT_INSTANCE=HOST PHANPY_CLIENT_NAME="Phanpy for Micro.blog" npm run build
+npm run build
 ```
 
 ```bash

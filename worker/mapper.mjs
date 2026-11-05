@@ -19,9 +19,15 @@ function extractEmojis(html) {
   const emojis = new Map();
   const content = html.replace(IMG, (tag) => {
     const shortcode = attr(tag, 'alt');
-    if (!/\bcustom_emoji\b/.test(attr(tag, 'class') ?? '') || !shortcode) return tag;
+    if (!/\bcustom_emoji\b/.test(attr(tag, 'class') ?? '') || !shortcode)
+      return tag;
     const url = attr(tag, 'src');
-    emojis.set(shortcode, { shortcode, url, static_url: url, visible_in_picker: false });
+    emojis.set(shortcode, {
+      shortcode,
+      url,
+      static_url: url,
+      visible_in_picker: false,
+    });
     return `:${shortcode}:`;
   });
   return { content, emojis: [...emojis.values()] };
@@ -47,7 +53,10 @@ function extractMedia(html, postId) {
     };
   });
   // Micro.blog wraps some images in their own paragraph, which would leave a gap.
-  const content = html.replace(IMG, '').replace(/<p>\s*<\/p>/g, '').trim();
+  const content = html
+    .replace(IMG, '')
+    .replace(/<p>\s*<\/p>/g, '')
+    .trim();
   return { content, media };
 }
 
@@ -111,7 +120,8 @@ export function toStatus(item, { extractImages = false, parent = null } = {}) {
     reblogs_count: 0,
     favourites_count: 0,
     replies_count: 0,
-    favourited: Boolean(item._microblog?.is_favorite),
+    // Micro.blog stores bookmarks as favorites, so this would duplicate `bookmarked`.
+    favourited: false,
     reblogged: false,
     muted: false,
     pinned: false,
@@ -254,7 +264,8 @@ export function unsupportedPostOption(fields) {
   }
   for (const [name, value] of Object.entries(fields)) {
     if (name === 'visibility' || HARMLESS_POST_FIELDS.has(name)) continue;
-    if (!isEmpty(value)) return `Not sent: ${name} isn't supported on Micro.blog.`;
+    if (!isEmpty(value))
+      return `Not sent: ${name} isn't supported on Micro.blog.`;
   }
   return null;
 }

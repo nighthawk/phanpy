@@ -1,0 +1,59 @@
+/*
+  Micro.blog has no boosts, likes, private posts or the like, so the controls for
+  them go. Keeping this in one stylesheet avoids edits to the busiest upstream files.
+*/
+
+/* Post actions, in the action bar and the post menu. */
+.reblog-button,
+.favourite-button,
+.menu-reblog,
+.menu-favourite,
+.szh-menu__item:has(.icon[data-icon='react']) {
+  display: none !important;
+}
+
+/* Navigation menu. "More…" would be left empty, so it goes too. */
+.szh-menu__item:has(> * > .icon[data-icon='history2']),
+.szh-menu__item:has(> .icon[data-icon='more']),
+.szh-menu__item:has(> * > .icon[data-icon='chart']),
+.szh-menu__item:has(> * > .icon[data-icon='building']),
+.szh-menu__item:has(> * > .icon[data-icon='earth']) {
+  display: none !important;
+}
+
+/* Post and profile menus: muting, blocking and reporting aren't supported. */
+.szh-menu__item:has(> .icon[data-icon='mute']),
+.szh-menu__item:has(> .icon[data-icon='block']),
+.szh-menu__item:has(> .icon[data-icon='flag']) {
+  display: none !important;
+}
+
+/*
+  Composer: everything published is public, and the proxy refuses these options
+  anyway. Media returns when uploads are supported.
+*/
+.compose-footer .add-toolbar-button-group > *,
+.compose-footer label:has(select[name='visibility']),
+.compose-footer label:has(select[name='language']) {
+  display: none !important;
+}
+
+/* Profile: Micro.blog has follower-free profiles, and only "Following" is real. */
+.account-container .stats > :nth-child(1),
+.account-container .stats > :nth-child(3),
+.account-container .stats > :nth-child(4),
+.account-container .account-metadata-box {
+  display: none !important;
+}
+
+/* The proxy can't filter profile feeds, so these toggles would mislead. */
+#account-statuses-page .filter-bar {
+  display: none !important;
+}
+
+/* Welcome page: features that depend on boosts and hashtags. */
+#why-container section:nth-child(1),
+#why-container section:nth-child(2),
+#why-container section:nth-child(5) {
+  display: none !important;
+}

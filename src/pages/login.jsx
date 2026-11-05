@@ -26,7 +26,7 @@ import {
 } from '../utils/store-utils';
 import useTitle from '../utils/useTitle';
 
-const { PHANPY_DEFAULT_INSTANCE: DEFAULT_INSTANCE } = import.meta.env;
+const DEFAULT_INSTANCE = location.host;
 
 function Login() {
   const { t } = useLingui();
@@ -35,8 +35,9 @@ function Login() {
   const cachedInstanceURL = store.local.get('instanceURL');
   const [uiState, setUIState] = useState('default');
   const [searchParams] = useSearchParams();
-  const instance = searchParams.get('instance');
-  const submit = searchParams.get('submit');
+  // There's only one server, so sign-in never needs to ask which.
+  const instance = searchParams.get('instance') || DEFAULT_INSTANCE;
+  const submit = true;
   const [instanceText, setInstanceText] = useState(
     instance || cachedInstanceURL?.toLowerCase() || '',
   );

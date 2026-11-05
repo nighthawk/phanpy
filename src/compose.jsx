@@ -1,5 +1,6 @@
 import './index.css';
 import './app.css';
+import './microblog.css';
 
 import './polyfills';
 

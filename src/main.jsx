@@ -1,5 +1,6 @@
 import './index.css';
 import './cloak-mode.css';
+import './microblog.css';
 
 import './polyfills';
 

@@ -46,7 +46,9 @@ test('toStatus fills every field Phanpy dereferences', () => {
 });
 
 test('toStatus carries bookmark state from the post', () => {
-  const status = toStatus(item('1', 'ann', '<p>Hi</p>', 1, { is_bookmark: true }));
+  const status = toStatus(
+    item('1', 'ann', '<p>Hi</p>', 1, { is_bookmark: true }),
+  );
   assert.equal(status.bookmarked, true);
 });
 
@@ -68,7 +70,11 @@ test('toStatus moves inline images into media attachments', () => {
   assert.equal(media.type, 'image');
   assert.equal(media.url, 'https://cdn.example/a.jpg');
   assert.equal(media.description, 'A pumpkin');
-  assert.deepEqual(media.meta.original, { width: 600, height: 400, aspect: 1.5 });
+  assert.deepEqual(media.meta.original, {
+    width: 600,
+    height: 400,
+    aspect: 1.5,
+  });
 });
 
 test('toStatus leaves inline images alone unless asked', () => {
@@ -82,7 +88,10 @@ test('toStatus reads Mastodon-style mention markup', () => {
   const html =
     '<p><span class="h-card"><a href="https://social.coop/@dajb" class="u-url mention">@<span>dajb</span></a></span> hi</p>';
   const status = toStatus(item('6', 'manton', html, 6));
-  assert.deepEqual(status.mentions.map((m) => m.acct), ['dajb']);
+  assert.deepEqual(
+    status.mentions.map((m) => m.acct),
+    ['dajb'],
+  );
 });
 
 test('toAccount uses the username as the id and adds profile fields', () => {
@@ -105,8 +114,14 @@ test('toContext splits a newest-first list around the focused post', () => {
     item('1', 'ann', '<p>one</p>', 1),
   ];
   const { ancestors, descendants } = toContext(items, '2');
-  assert.deepEqual(ancestors.map((s) => s.id), ['1']);
-  assert.deepEqual(descendants.map((s) => s.id), ['3']);
+  assert.deepEqual(
+    ancestors.map((s) => s.id),
+    ['1'],
+  );
+  assert.deepEqual(
+    descendants.map((s) => s.id),
+    ['3'],
+  );
 });
 
 test('toContext infers a reply parent from the leading mention', () => {
@@ -134,7 +149,12 @@ test('toContext falls back to the root when the mention matches no one', () => {
 
 test('toContext matches a bare mention to a fediverse author', () => {
   const items = [
-    item('3', 'ann', '<p><a href="https://social.coop/@dajb" class="mention">@<span>dajb</span></a> three</p>', 3),
+    item(
+      '3',
+      'ann',
+      '<p><a href="https://social.coop/@dajb" class="mention">@<span>dajb</span></a> three</p>',
+      3,
+    ),
     item('2', 'dajb@social.coop', '<p>two</p>', 2),
     item('1', 'ann', '<p>one</p>', 1),
   ];
@@ -146,10 +166,10 @@ test('toContext matches a bare mention to a fediverse author', () => {
 });
 
 test('paginationLink points the next page before the oldest post', () => {
-  const link = paginationLink('http://localhost:4010/api/v1/timelines/home?limit=20', [
-    { id: '9' },
-    { id: '5' },
-  ]);
+  const link = paginationLink(
+    'http://localhost:4010/api/v1/timelines/home?limit=20',
+    [{ id: '9' }, { id: '5' }],
+  );
   assert.equal(
     link,
     '<http://localhost:4010/api/v1/timelines/home?limit=20&max_id=5>; rel="next"',
@@ -163,19 +183,28 @@ test('paginationLink is absent on an empty page, which ends the iterator', () =>
 test('pageItems drops posts at or after max_id, which profile feeds ignore', () => {
   const items = [{ id: '9' }, { id: '7' }, { id: '5' }, { id: '3' }];
   const page = pageItems(items, new URLSearchParams({ max_id: '7' }));
-  assert.deepEqual(page.map((i) => i.id), ['5', '3']);
+  assert.deepEqual(
+    page.map((i) => i.id),
+    ['5', '3'],
+  );
 });
 
 test('pageItems compares ids numerically, not as text', () => {
   const items = [{ id: '100' }, { id: '99' }];
   const page = pageItems(items, new URLSearchParams({ max_id: '100' }));
-  assert.deepEqual(page.map((i) => i.id), ['99']);
+  assert.deepEqual(
+    page.map((i) => i.id),
+    ['99'],
+  );
 });
 
 test('pageItems trims to the limit, which count does not guarantee', () => {
   const items = [{ id: '9' }, { id: '7' }, { id: '5' }];
   const page = pageItems(items, new URLSearchParams({ limit: '2' }));
-  assert.deepEqual(page.map((i) => i.id), ['9', '7']);
+  assert.deepEqual(
+    page.map((i) => i.id),
+    ['9', '7'],
+  );
 });
 
 test('toStatus turns custom emoji images into shortcodes, not media', () => {
@@ -218,7 +247,10 @@ test('readFields parses both JSON and form bodies', () => {
     { status: 'Hi', in_reply_to_id: '1' },
   );
   assert.deepEqual(
-    readFields('application/x-www-form-urlencoded; charset=utf-8', 'status=Hi&in_reply_to_id=1'),
+    readFields(
+      'application/x-www-form-urlencoded; charset=utf-8',
+      'status=Hi&in_reply_to_id=1',
+    ),
     { status: 'Hi', in_reply_to_id: '1' },
   );
   assert.deepEqual(readFields('application/json', ''), {});
@@ -245,13 +277,19 @@ test('bookmarkPostId keeps the bookmark id when the URL has no post id', () => {
     id: '100367361',
     url: 'https://aus.social/users/nighthawk/statuses/117548881100007265',
   };
-  const blog = { id: '8621185', url: 'https://adrian.example/micro/2020/03/16.html' };
+  const blog = {
+    id: '8621185',
+    url: 'https://adrian.example/micro/2020/03/16.html',
+  };
   assert.equal(bookmarkPostId(fediverse), '100367361');
   assert.equal(bookmarkPostId(blog), '8621185');
 });
 
 test('unsupportedPostOption refuses any field it does not recognise', () => {
-  assert.match(unsupportedPostOption({ status: 'Hi', new_field: 'x' }), /new_field/);
+  assert.match(
+    unsupportedPostOption({ status: 'Hi', new_field: 'x' }),
+    /new_field/,
+  );
 });
 
 test('unsupportedPostOption ignores empty values and known harmless fields', () => {
@@ -269,4 +307,13 @@ test('unsupportedPostOption ignores empty values and known harmless fields', () 
     }),
     null,
   );
+});
+
+test('toStatus does not report a bookmark as a like', () => {
+  // Micro.blog stores bookmarks as favorites, which would show a heart beside them.
+  const status = toStatus(
+    item('9', 'ann', '<p>Hi</p>', 9, { is_favorite: true, is_bookmark: true }),
+  );
+  assert.equal(status.favourited, false);
+  assert.equal(status.bookmarked, true);
 });

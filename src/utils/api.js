@@ -14,7 +14,8 @@ import {
 } from './store-utils';
 
 // Default *fallback* instance
-const DEFAULT_INSTANCE = 'mastodon.social';
+// The Worker serves the app and the API from one host.
+const DEFAULT_INSTANCE = location.host;
 
 // Per-instance masto instance
 // Useful when only one account is logged in
