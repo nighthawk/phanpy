@@ -18,6 +18,7 @@
     "messages:extract:clean": "lingui extract --locale en --clean",
     "messages:compile": "lingui compile",
     "test": "playwright test",
+    "test:worker": "node --test worker/",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
     "formatting": "oxfmt --check || oxfmt",
