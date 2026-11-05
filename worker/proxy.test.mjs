@@ -35,7 +35,7 @@ function stubUpstream(routes = {}) {
 }
 
 const request = (path, { token, ...init } = {}) =>
-  new Request(`${ORIGIN}${path}`, {
+  new Request(path.startsWith('http') ? path : `${ORIGIN}${path}`, {
     ...init,
     headers: {
       ...init.headers,
@@ -579,4 +579,209 @@ test('a reply already published still succeeds if reading it back fails', async 
     calls.filter(({ key }) => key === 'POST /posts/reply').length,
     1,
   );
+});
+
+function fakeKv() {
+  const data = new Map();
+  let writes = 0;
+  return {
+    data,
+    writes: () => writes,
+    get: async (key) => data.get(key) ?? null,
+    put: async (key, value) => {
+      writes += 1;
+      data.set(key, value);
+    },
+  };
+}
+
+// Answers /account/verify as whichever user owns the token.
+const verifyByToken = ({}, init) => ({
+  username: new URLSearchParams(init.body).get('token'),
+});
+
+const markerPost = (token, kv, fetch, id = '50') =>
+  handleProxy(
+    request('/api/v1/markers', {
+      token,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifications: { last_read_id: id } }),
+    }),
+    { fetch, kv },
+  );
+
+const markerGet = (token, kv, fetch) =>
+  handleProxy(request('/api/v1/markers?timeline[]=notifications', { token }), {
+    fetch,
+    kv,
+  });
+
+test('a read position saved by a user comes back for that user', async () => {
+  const kv = fakeKv();
+  const { fetch } = stubUpstream({ 'POST /account/verify': verifyByToken });
+  const saved = await markerPost('alice', kv, fetch);
+  assert.equal((await saved.json()).notifications.last_read_id, '50');
+  const res = await markerGet('alice', kv, fetch);
+  const body = await res.json();
+  assert.equal(body.notifications.last_read_id, '50');
+  assert.ok(body.notifications.updated_at);
+});
+
+test("one user's read position is never returned to another", async () => {
+  const kv = fakeKv();
+  const { fetch } = stubUpstream({ 'POST /account/verify': verifyByToken });
+  await markerPost('alice', kv, fetch);
+  const res = await markerGet('bob', kv, fetch);
+  assert.deepEqual(await res.json(), {});
+});
+
+test('read positions are stored under the verified user, not the token', async () => {
+  const kv = fakeKv();
+  const { fetch } = stubUpstream({
+    'POST /account/verify': { username: 'alice' },
+  });
+  await markerPost('SECRET-TOKEN', kv, fetch);
+  assert.deepEqual([...kv.data.keys()], ['markers:alice']);
+  assert.ok(!kv.data.get('markers:alice').includes('SECRET-TOKEN'));
+});
+
+test('an unchanged read position does not write again', async () => {
+  const kv = fakeKv();
+  const { fetch } = stubUpstream({ 'POST /account/verify': verifyByToken });
+  await markerPost('alice', kv, fetch);
+  await markerPost('alice', kv, fetch);
+  assert.equal(kv.writes(), 1);
+});
+
+test('read positions need a signed-in user', async () => {
+  const kv = fakeKv();
+  const { fetch } = stubUpstream();
+  const res = await markerPost(null, kv, fetch);
+  assert.equal(res.status, 401);
+  assert.equal(kv.data.size, 0);
+});
+
+test('read positions still answer when no store is configured', async () => {
+  const { fetch } = stubUpstream({ 'POST /account/verify': verifyByToken });
+  const saved = await markerPost('alice', undefined, fetch);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(
+    await (await markerGet('alice', undefined, fetch)).json(),
+    {},
+  );
+});
+
+const foundUser = {
+  name: 'Ann',
+  url: 'https://ann.example',
+  avatar: 'https://cdn.example/ann.jpg',
+  username: 'ann@social.example',
+  bio: 'Hello',
+  is_following: true,
+  is_you: false,
+};
+
+test('search returns matching accounts and posts', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /users/search': [foundUser],
+    'GET /posts/search': { items: [post(8, 'bob')] },
+  });
+  const res = await handleProxy(
+    request('/api/v2/search?q=coffee', { token: 'tok' }),
+    { fetch },
+  );
+  const body = await res.json();
+  assert.equal(body.accounts[0].acct, 'ann@social.example');
+  assert.equal(body.accounts[0].note, 'Hello');
+  assert.equal(body.statuses[0].id, '8');
+  assert.deepEqual(body.hashtags, []);
+  assert.equal(
+    calls
+      .find(({ key }) => key === 'GET /posts/search')
+      .url.searchParams.get('q'),
+    'coffee',
+  );
+});
+
+test('search only queries the requested type', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /users/search': [foundUser],
+  });
+  const res = await handleProxy(
+    request('/api/v2/search?q=ann&type=accounts&limit=1', { token: 'tok' }),
+    { fetch },
+  );
+  assert.equal((await res.json()).statuses.length, 0);
+  assert.deepEqual(
+    calls.map(({ key }) => key),
+    ['GET /users/search'],
+  );
+});
+
+test('search has no results without a token rather than failing', async () => {
+  const { fetch } = stubUpstream({
+    'GET /users/search': () => new Response('No', { status: 401 }),
+    'GET /posts/search': { items: [post(8, 'bob')] },
+  });
+  const res = await handleProxy(request('/api/v2/search?q=ann'), { fetch });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.accounts, []);
+  assert.equal(body.statuses.length, 1);
+});
+
+test('search cannot resolve a URL into a post, so it finds nothing', async () => {
+  const { fetch, calls } = stubUpstream();
+  const res = await handleProxy(
+    request(
+      '/api/v2/search?q=https%3A%2F%2Faus.social%2F%40x%2F1&resolve=true',
+      { token: 'tok' },
+    ),
+    { fetch },
+  );
+  assert.deepEqual(await res.json(), {
+    accounts: [],
+    statuses: [],
+    hashtags: [],
+  });
+  assert.equal(calls.length, 0);
+});
+
+test('account search looks up people', async () => {
+  const { fetch } = stubUpstream({ 'GET /users/search': [foundUser] });
+  const res = await handleProxy(
+    request('/api/v1/accounts/search?q=ann', { token: 'tok' }),
+    { fetch },
+  );
+  assert.equal((await res.json())[0].id, 'ann@social.example');
+});
+
+test('the following list pages through its results', async () => {
+  const people = Array.from({ length: 5 }, (_, i) => ({
+    ...foundUser,
+    username: `user${i}`,
+  }));
+  const { fetch } = stubUpstream({ 'GET /users/following/ann': people });
+  const first = await handleProxy(
+    request('/api/v1/accounts/ann/following?limit=2', { token: 'tok' }),
+    { fetch },
+  );
+  assert.deepEqual(
+    (await first.json()).map((a) => a.id),
+    ['user0', 'user1'],
+  );
+  const next = first.headers.get('Link').match(/<([^>]+)>/)[1];
+  const second = await handleProxy(request(next, { token: 'tok' }), { fetch });
+  assert.deepEqual(
+    (await second.json()).map((a) => a.id),
+    ['user2', 'user3'],
+  );
+  const last = second.headers.get('Link').match(/<([^>]+)>/)[1];
+  const third = await handleProxy(request(last, { token: 'tok' }), { fetch });
+  assert.deepEqual(
+    (await third.json()).map((a) => a.id),
+    ['user4'],
+  );
+  assert.equal(third.headers.get('Link'), null);
 });

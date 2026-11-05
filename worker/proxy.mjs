@@ -110,10 +110,106 @@ async function fetchAccount(client, username) {
   return toAccount(feed.author, feed._microblog);
 }
 
-async function verifyCredentials(client, token) {
+async function verifiedUsername(client, token) {
   const { username } = await client.postForm('/account/verify', { token });
   if (!username) throw new UpstreamError(401, '/account/verify');
-  return fetchAccount(client, username);
+  return username;
+}
+
+async function verifyCredentials(client, token) {
+  return fetchAccount(client, await verifiedUsername(client, token));
+}
+
+// Mastodon keeps read positions on the server, and Micro.blog has nowhere to put
+// them. They're stored per verified user, so one user can never read another's.
+const MARKER_TIMELINES = ['home', 'notifications'];
+
+async function readMarkers(kv, username) {
+  const stored = await kv?.get(`markers:${username}`);
+  return stored ? JSON.parse(stored) : {};
+}
+
+async function getMarkers(client, token, kv) {
+  if (!kv) return { body: {} };
+  return { body: await readMarkers(kv, await verifiedUsername(client, token)) };
+}
+
+async function saveMarkers(client, token, kv, fields) {
+  const username = await verifiedUsername(client, token);
+  const markers = await readMarkers(kv, username);
+  let changed = false;
+  for (const timeline of MARKER_TIMELINES) {
+    const id = fields[timeline]?.last_read_id;
+    if (!id || markers[timeline]?.last_read_id === id) continue;
+    markers[timeline] = {
+      last_read_id: id,
+      version: (markers[timeline]?.version ?? 0) + 1,
+      updated_at: new Date().toISOString(),
+    };
+    changed = true;
+  }
+  // KV writes are the scarcest resource on the free plan.
+  if (changed) await kv?.put(`markers:${username}`, JSON.stringify(markers));
+  return { body: markers };
+}
+
+const userAccount = (user) => toAccount(user, user);
+
+// Finding people needs a token, while finding posts doesn't, so one can still answer.
+async function findOrNothing(request) {
+  try {
+    return await request();
+  } catch (error) {
+    if (error instanceof UpstreamError && [401, 403].includes(error.status)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function searchAccounts(client, q) {
+  const path = `/users/search?q=${encodeURIComponent(q)}`;
+  const users = await findOrNothing(() => client.call(path));
+  return (Array.isArray(users) ? users : []).map(userAccount);
+}
+
+async function searchStatuses(client, q) {
+  const path = `/posts/search?q=${encodeURIComponent(q)}`;
+  const feed = await findOrNothing(() => client.call(path));
+  return (feed?.items ?? []).map((item) => toStatus(item, STATUS_OPTIONS));
+}
+
+async function search(client, url) {
+  const { searchParams } = url;
+  const q = searchParams.get('q') ?? '';
+  const type = searchParams.get('type');
+  const limit = Number(searchParams.get('limit')) || 20;
+  const offset = Number(searchParams.get('offset')) || 0;
+  const page = (results) => results.slice(offset, offset + limit);
+  // Micro.blog can't fetch a remote post or profile from a URL.
+  const canSearch = q && !/^https?:\/\//i.test(q);
+  const wants = (name) => canSearch && (!type || type === name);
+  return {
+    body: {
+      accounts: wants('accounts') ? page(await searchAccounts(client, q)) : [],
+      statuses: wants('statuses') ? page(await searchStatuses(client, q)) : [],
+      hashtags: [],
+    },
+  };
+}
+
+// Micro.blog returns everyone at once, so pages are cut here using an offset.
+async function followingResponse(client, username, url) {
+  const limit = Number(url.searchParams.get('limit')) || 40;
+  const offset = Number(url.searchParams.get('offset')) || 0;
+  const people = await client.call(`/users/following/${encodeURI(username)}`);
+  const end = offset + limit;
+  const next = new URL(url);
+  next.searchParams.set('offset', end);
+  return {
+    body: people.slice(offset, end).map(userAccount),
+    headers: end < people.length ? { Link: `<${next}>; rel="next"` } : {},
+  };
 }
 
 async function conversation(client, id) {
@@ -281,7 +377,7 @@ function instanceInfo(host) {
   };
 }
 
-async function route(request, url, fetch) {
+async function route(request, url, fetch, kv) {
   const { pathname, origin, host } = url;
   const { method } = request;
   const token =
@@ -351,8 +447,17 @@ async function route(request, url, fetch) {
     if (!token) return { status: 401, body: { error: 'No token' } };
     return { body: await verifyCredentials(client, token) };
   }
-  if (pathname === '/api/v1/preferences' || pathname === '/api/v1/markers') {
-    return { body: {} };
+  if (pathname === '/api/v1/preferences') return { body: {} };
+  if (pathname === '/api/v1/markers') {
+    if (!token) return { status: 401, body: { error: 'No token' } };
+    return method === 'POST'
+      ? saveMarkers(client, token, kv, fields)
+      : getMarkers(client, token, kv);
+  }
+  if (pathname === '/api/v2/search') return search(client, url);
+  if (pathname === '/api/v1/accounts/search') {
+    const q = url.searchParams.get('q') ?? '';
+    return { body: q ? await searchAccounts(client, q) : [] };
   }
   if (pathname === '/api/v1/timelines/home') {
     return feedResponse(client, '/posts/timeline', url);
@@ -401,6 +506,11 @@ async function route(request, url, fetch) {
     return profileResponse(client, username, url);
   }
 
+  const following = pathname.match(/^\/api\/v1\/accounts\/([^/]+)\/following$/);
+  if (following) {
+    return followingResponse(client, decodeURIComponent(following[1]), url);
+  }
+
   const status = pathname.match(/^\/api\/v1\/statuses\/(\d+)(\/context)?$/);
   if (status && method === 'GET') {
     if (status[2]) {
@@ -425,7 +535,10 @@ const isProxied = (pathname) =>
   WELL_KNOWN.has(pathname);
 
 // Returns null for anything that belongs to the static app.
-export async function handleProxy(request, { fetch = globalThis.fetch } = {}) {
+export async function handleProxy(
+  request,
+  { fetch = globalThis.fetch, kv } = {},
+) {
   const url = new URL(request.url);
   if (!isProxied(url.pathname)) return null;
   const baseHeaders = {
@@ -437,7 +550,7 @@ export async function handleProxy(request, { fetch = globalThis.fetch } = {}) {
       status = 200,
       body,
       headers = {},
-    } = await route(request, url, fetch);
+    } = await route(request, url, fetch, kv);
     return new Response(body === undefined ? null : JSON.stringify(body), {
       status,
       headers: { ...baseHeaders, ...headers },

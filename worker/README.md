@@ -8,8 +8,9 @@ Micro.blog doesn't offer the Mastodon client API that Phanpy is built on, so thi
 Cloudflare Worker presents that API and calls Micro.blog's own API behind it. The
 same Worker serves the app, so both share one hostname.
 
-Every user's Micro.blog token passes through the Worker. It keeps no state between
-requests and must never log tokens, sign-in codes or query strings. Mastodon accounts
+Every user's Micro.blog token passes through the Worker, which must never log
+tokens, sign-in codes or query strings. The only thing it stores is each user's read
+positions, in Cloudflare KV under their username, so notifications can show what's new. Mastodon accounts
 talk to their own servers directly, so their tokens never reach it.
 
 ## Tests
@@ -42,7 +43,8 @@ npx wrangler deploy
   mentions, followers-only posts, content warnings, polls and scheduling are refused
   rather than sent without them.
 - Direct messages don't appear, because Micro.blog's API has no route for them.
-- Notifications are mentions only and always look unread.
+- Notifications are mentions only.
+- Search finds people and posts, but not hashtags, and can't look up a post by URL.
 - Bookmarks of fediverse or external-blog posts open without their thread.
 - Profiles only page back about 400 posts, and deep pages load slowly.
 - Signing out doesn't revoke the token. Do that in your Micro.blog account settings.
