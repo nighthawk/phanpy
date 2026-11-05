@@ -24,6 +24,7 @@ import RecentSearches from '../components/recent-searches';
 import SearchForm from '../components/search-form';
 import Status from '../components/status';
 import { api } from '../utils/api';
+import { isMicroblogAccount } from '../utils/microblog-account';
 import { fetchRelationships } from '../utils/relationships';
 import setRef from '../utils/set-ref';
 import shortenNumber from '../utils/shorten-number';
@@ -573,9 +574,13 @@ function Search({ columnMode, ...props }) {
           ) : (
             <>
               <p class="ui-state insignificant">
-                <Trans>
-                  Enter your search term or paste a URL above to get started.
-                </Trans>
+                {isMicroblogAccount() ? (
+                  'Search for featured posts, users by Micro.blog name, domain name, or Mastodon username.'
+                ) : (
+                  <Trans>
+                    Enter your search term or paste a URL above to get started.
+                  </Trans>
+                )}
               </p>
               <RecentSearches />
             </>
