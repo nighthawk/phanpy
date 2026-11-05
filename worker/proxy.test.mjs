@@ -356,3 +356,126 @@ test('personal API responses are never stored by a cache', async () => {
   );
   assert.equal(res.headers.get('Cache-Control'), 'no-store');
 });
+
+// A profile feed ignores before_id and returns twice the requested count.
+function profileFeed(total) {
+  const all = Array.from({ length: total }, (_, i) =>
+    post(String(total - i), 'ann'),
+  );
+  return (url) => ({
+    author: {},
+    _microblog: {},
+    items: all.slice(0, Number(url.searchParams.get('count')) * 2),
+  });
+}
+
+test('the first profile page fetches only what it needs', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/ann': profileFeed(1000),
+  });
+  const res = await handleProxy(
+    request('/api/v1/accounts/ann/statuses?limit=20'),
+    { fetch },
+  );
+  assert.equal((await res.json()).length, 20);
+  assert.deepEqual(
+    calls.map(({ url }) => url.searchParams.get('count')),
+    ['20'],
+  );
+});
+
+test('later profile pages fetch deeper until the page fills', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/ann': profileFeed(1000),
+  });
+  // 60 posts in: count=20 only reaches 40 posts and count=40 reaches 80.
+  const res = await handleProxy(
+    request('/api/v1/accounts/ann/statuses?limit=20&max_id=941'),
+    { fetch },
+  );
+  const body = await res.json();
+  assert.equal(body.length, 20);
+  assert.equal(body[0].id, '940');
+  assert.deepEqual(
+    calls.map(({ url }) => url.searchParams.get('count')),
+    ['20', '40'],
+  );
+});
+
+test('a profile with no older posts stops fetching', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/ann': profileFeed(5),
+  });
+  const res = await handleProxy(
+    request('/api/v1/accounts/ann/statuses?limit=20&max_id=1'),
+    { fetch },
+  );
+  assert.deepEqual(await res.json(), []);
+  assert.equal(calls.length, 1);
+});
+
+test('deep profile paging stops at the fetch limit', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/ann': profileFeed(5000),
+  });
+  await handleProxy(
+    request('/api/v1/accounts/ann/statuses?limit=20&max_id=2'),
+    { fetch },
+  );
+  assert.equal(calls.at(-1).url.searchParams.get('count'), '200');
+});
+
+// Bookmarks of fediverse or blog posts have no post id, and no conversation.
+const unresolvedBookmark = {
+  ...post(55, 'ann'),
+  url: 'https://aus.social/users/ann/statuses/1',
+};
+
+test('an unresolved bookmark opens from the user’s own bookmarks', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': { items: [] },
+    'GET /posts/bookmarks': { items: [unresolvedBookmark, post(40, 'bob')] },
+  });
+  const res = await handleProxy(
+    request('/api/v1/statuses/55', { token: 'alice' }),
+    { fetch },
+  );
+  assert.equal((await res.json()).id, '55');
+  const lookup = calls.find(({ key }) => key === 'GET /posts/bookmarks');
+  assert.equal(lookup.init.headers.Authorization, 'Bearer alice');
+  assert.equal(lookup.url.searchParams.get('before_id'), '56');
+});
+
+test('an unknown post does not fall back without a token', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': { items: [] },
+  });
+  const res = await handleProxy(request('/api/v1/statuses/55'), { fetch });
+  assert.equal(res.status, 404);
+  assert.equal(calls.length, 1);
+});
+
+test('unbookmarking an unresolved row still returns its post', async () => {
+  let removed = false;
+  const { fetch } = stubUpstream({
+    'GET /posts/conversation': { items: [] },
+    'GET /posts/bookmarks': () => ({
+      items: removed ? [] : [unresolvedBookmark],
+    }),
+    'DELETE /posts/bookmarks/55': () => {
+      removed = true;
+      return {};
+    },
+  });
+  const res = await handleProxy(
+    request('/api/v1/statuses/55/unbookmark', {
+      token: 'alice',
+      method: 'POST',
+    }),
+    { fetch },
+  );
+  const body = await res.json();
+  assert.equal(body.id, '55');
+  assert.equal(body.bookmarked, false);
+  assert.equal(removed, true);
+});

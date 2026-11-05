@@ -16,6 +16,7 @@ import {
 } from './mapper.mjs';
 
 const UPSTREAM = 'https://micro.blog';
+const MAX_PROFILE_COUNT = 200;
 const STATUS_OPTIONS = { extractImages: true };
 const WELL_KNOWN = new Set([
   '/.well-known/nodeinfo',
@@ -67,20 +68,34 @@ function feedQuery(params) {
   return query.toString();
 }
 
-async function feedResponse(
-  client,
-  path,
-  url,
-  query = feedQuery(url.searchParams),
-  convert = toStatus,
-) {
-  const feed = await client.call(query ? `${path}?${query}` : path);
-  const items = pageItems(feed.items ?? [], url.searchParams);
+function pageResponse(items, url, convert = toStatus) {
   const link = paginationLink(url.href, items);
   return {
     body: items.map((item) => convert(item, STATUS_OPTIONS)),
     headers: link ? { Link: link } : {},
   };
+}
+
+async function feedResponse(client, path, url, convert) {
+  const query = feedQuery(url.searchParams);
+  const feed = await client.call(query ? `${path}?${query}` : path);
+  return pageResponse(pageItems(feed.items ?? [], url.searchParams), url, convert);
+}
+
+// Profile feeds ignore before_id, so older pages can only be reached by fetching
+// from the newest post. Deep fetches are slow (25s for count=200 on a fediverse
+// account), so start shallow and go deeper only until the page fills.
+async function profileResponse(client, username, url) {
+  const limit = Number(url.searchParams.get('limit')) || 20;
+  let count = Math.min(limit, MAX_PROFILE_COUNT);
+  while (true) {
+    const feed = await client.call(`${userPath(username)}?count=${count}`);
+    const fetched = feed.items ?? [];
+    const items = pageItems(fetched, url.searchParams);
+    const exhausted = fetched.length < count || count >= MAX_PROFILE_COUNT;
+    if (items.length >= limit || exhausted) return pageResponse(items, url);
+    count = Math.min(count * 2, MAX_PROFILE_COUNT);
+  }
 }
 
 const userPath = (username) => `/posts/${encodeURI(username)}`;
@@ -106,19 +121,29 @@ function bookmarkStatus(item, options) {
   return toStatus({ ...item, id: bookmarkPostId(item) }, options);
 }
 
-async function setBookmark(client, id, bookmarked) {
+// Bookmarks of fediverse or blog posts keep their own id and have no conversation,
+// so they're looked up in the signed-in user's bookmarks, which are newest-first.
+async function findStatus(client, token, id) {
+  const items = await conversation(client, id);
+  const found = toThreadStatus(items, id, STATUS_OPTIONS);
+  if (found || !token) return found;
+  const feed = await client.call(`/posts/bookmarks?before_id=${BigInt(id) + 1n}`);
+  const bookmark = feed.items?.find((item) => item.id === id);
+  return bookmark && toStatus(bookmark, STATUS_OPTIONS);
+}
+
+async function setBookmark(client, token, id, bookmarked) {
+  let status;
   if (bookmarked) {
     await client.postForm('/posts/bookmarks', { id });
+    status = await findStatus(client, token, id);
   } else {
+    // Looked up first, because an unresolved bookmark can't be found once removed.
+    status = await findStatus(client, token, id);
     await client.call(`/posts/bookmarks/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
-  const status = toThreadStatus(
-    await conversation(client, id),
-    id,
-    STATUS_OPTIONS,
-  );
   if (!status) throw new UpstreamError(404, '/posts/conversation');
   // The action just succeeded, so don't let a stale flag undo it in the UI.
   return { body: { ...status, bookmarked } };
@@ -315,29 +340,17 @@ async function route(request, url, fetch) {
   if (pathname === '/api/v1/notifications') {
     if (!token) return { status: 401, body: { error: 'No token' } };
     if (!wantsMentions(url.searchParams)) return { body: [] };
-    return feedResponse(
-      client,
-      '/posts/mentions',
-      url,
-      feedQuery(url.searchParams),
-      toNotification,
-    );
+    return feedResponse(client, '/posts/mentions', url, toNotification);
   }
   if (pathname === '/api/v1/bookmarks') {
-    return feedResponse(
-      client,
-      '/posts/bookmarks',
-      url,
-      feedQuery(url.searchParams),
-      bookmarkStatus,
-    );
+    return feedResponse(client, '/posts/bookmarks', url, bookmarkStatus);
   }
   if (pathname === '/api/v1/statuses' && method === 'POST') {
     return createReply(client, token, fields);
   }
   const bookmark = pathname.match(/^\/api\/v1\/statuses\/(\d+)\/(un)?bookmark$/);
   if (bookmark && method === 'POST') {
-    return setBookmark(client, bookmark[1], !bookmark[2]);
+    return setBookmark(client, token, bookmark[1], !bookmark[2]);
   }
   if (pathname === '/api/v1/accounts/lookup') {
     return { body: await fetchAccount(client, url.searchParams.get('acct')) };
@@ -363,15 +376,16 @@ async function route(request, url, fetch) {
     const username = decodeURIComponent(account[1]);
     if (!account[2]) return { body: await fetchAccount(client, username) };
     if (url.searchParams.get('pinned') === 'true') return { body: [] };
-    // Profile feeds ignore before_id, so fetch deep (about 400 posts) and page here.
-    return feedResponse(client, userPath(username), url, 'count=200');
+    return profileResponse(client, username, url);
   }
 
   const status = pathname.match(/^\/api\/v1\/statuses\/(\d+)(\/context)?$/);
   if (status && method === 'GET') {
-    const items = await conversation(client, status[1]);
-    if (status[2]) return { body: toContext(items, status[1], STATUS_OPTIONS) };
-    const found = toThreadStatus(items, status[1], STATUS_OPTIONS);
+    if (status[2]) {
+      const items = await conversation(client, status[1]);
+      return { body: toContext(items, status[1], STATUS_OPTIONS) };
+    }
+    const found = await findStatus(client, token, status[1]);
     return found ? { body: found } : { status: 404, body: { error: 'Not found' } };
   }
 

@@ -41,5 +41,6 @@ npx wrangler deploy
 - Thread nesting is inferred from mentions, because Micro.blog has no reply-to data.
 - New posts, media uploads and follows aren't supported yet. Replies are.
 - Notifications are mentions only and always look unread.
-- Bookmarks of fediverse or external-blog posts list but won't open.
+- Bookmarks of fediverse or external-blog posts open without their thread.
+- Profiles only page back about 400 posts, and deep pages load slowly.
 - Signing out doesn't revoke the token. Do that in your Micro.blog account settings.
