@@ -40,6 +40,10 @@ npx wrangler deploy
 
 - Thread nesting is inferred from mentions, because Micro.blog has no reply-to data.
 - New posts, media uploads and follows aren't supported yet. Replies are.
+- Everything published is public, because Micro.blog has no private posts. Private
+  mentions, followers-only posts, content warnings, polls and scheduling are refused
+  rather than sent without them.
+- Direct messages don't appear, because Micro.blog's API has no route for them.
 - Notifications are mentions only and always look unread.
 - Bookmarks of fediverse or external-blog posts open without their thread.
 - Profiles only page back about 400 posts, and deep pages load slowly.

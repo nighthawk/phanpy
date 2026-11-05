@@ -11,6 +11,7 @@ import {
   toContext,
   toNotification,
   toStatus,
+  unsupportedPostOption,
   wantsMentions,
 } from './mapper.mjs';
 
@@ -247,4 +248,25 @@ test('bookmarkPostId keeps the bookmark id when the URL has no post id', () => {
   const blog = { id: '8621185', url: 'https://adrian.example/micro/2020/03/16.html' };
   assert.equal(bookmarkPostId(fediverse), '100367361');
   assert.equal(bookmarkPostId(blog), '8621185');
+});
+
+test('unsupportedPostOption refuses any field it does not recognise', () => {
+  assert.match(unsupportedPostOption({ status: 'Hi', new_field: 'x' }), /new_field/);
+});
+
+test('unsupportedPostOption ignores empty values and known harmless fields', () => {
+  assert.equal(
+    unsupportedPostOption({
+      status: 'Hi',
+      in_reply_to_id: '1',
+      language: 'en',
+      quote_approval_policy: 'public',
+      visibility: 'public',
+      spoiler_text: '',
+      sensitive: false,
+      media_ids: [],
+      poll: null,
+    }),
+    null,
+  );
 });

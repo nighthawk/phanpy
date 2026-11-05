@@ -230,3 +230,31 @@ export function bookmarkPostId(item) {
     item.url?.match(/^https:\/\/micro\.blog\/[^/]+\/(\d+)$/)?.[1] ?? item.id
   );
 }
+
+const HARMLESS_POST_FIELDS = new Set([
+  'status',
+  'in_reply_to_id',
+  'language',
+  'quote_approval_policy',
+]);
+
+const isEmpty = (value) =>
+  value === null ||
+  value === undefined ||
+  value === '' ||
+  value === false ||
+  (Array.isArray(value) && value.length === 0);
+
+// Micro.blog's reply API takes only an id and content, and everything is public.
+// Dropping an option could publish what the author meant to limit, as when a
+// private mention went out publicly, so anything unrecognised is refused.
+export function unsupportedPostOption(fields) {
+  if (!isEmpty(fields.visibility) && fields.visibility !== 'public') {
+    return 'Micro.blog has no private posts, so this was not sent.';
+  }
+  for (const [name, value] of Object.entries(fields)) {
+    if (name === 'visibility' || HARMLESS_POST_FIELDS.has(name)) continue;
+    if (!isEmpty(value)) return `Not sent: ${name} isn't supported on Micro.blog.`;
+  }
+  return null;
+}

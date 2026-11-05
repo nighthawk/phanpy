@@ -479,3 +479,79 @@ test('unbookmarking an unresolved row still returns its post', async () => {
   assert.equal(body.bookmarked, false);
   assert.equal(removed, true);
 });
+
+const reply = (fields, fetch) =>
+  handleProxy(
+    request('/api/v1/statuses', {
+      token: 'tok',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'Hi', in_reply_to_id: '1', ...fields }),
+    }),
+    { fetch },
+  );
+
+// Publishing without one of these would expose something the author meant to limit.
+for (const [name, fields] of [
+  ['a private mention', { visibility: 'direct' }],
+  ['a followers-only post', { visibility: 'private' }],
+  ['an unlisted post', { visibility: 'unlisted' }],
+  ['a content warning', { spoiler_text: 'Spoilers' }],
+  ['sensitive media', { sensitive: true }],
+  ['a scheduled post', { scheduled_at: '2030-01-01T00:00:00Z' }],
+  ['a poll', { poll: { options: ['a', 'b'], expires_in: 60 } }],
+  ['media', { media_ids: ['9'] }],
+  ['a quote', { quoted_status_id: '2' }],
+]) {
+  test(`${name} is refused and never reaches Micro.blog`, async () => {
+    const { fetch, calls } = stubUpstream();
+    const res = await reply(fields, fetch);
+    assert.equal(res.status, 422);
+    assert.ok((await res.json()).error);
+    assert.equal(calls.length, 0);
+  });
+}
+
+test('Phanpy’s ordinary public reply fields are accepted', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': { items: [post(1, 'ann')] },
+    'POST /posts/reply': {},
+    'POST /account/verify': { username: 'me' },
+    'GET /posts/me': { author: {}, _microblog: { username: 'me' } },
+  });
+  const res = await reply(
+    {
+      visibility: 'public',
+      spoiler_text: '',
+      sensitive: false,
+      language: 'en',
+      media_ids: [],
+    },
+    fetch,
+  );
+  assert.equal(res.status, 200);
+  assert.equal(
+    calls.filter(({ key }) => key === 'POST /posts/reply').length,
+    1,
+  );
+});
+
+test('a reply already published still succeeds if reading it back fails', async () => {
+  // Phanpy resends a failed post, so an error here would publish a duplicate.
+  let replied = false;
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': () =>
+      replied ? new Response('Down', { status: 500 }) : { items: [post(1, 'ann')] },
+    'POST /posts/reply': () => {
+      replied = true;
+      return {};
+    },
+  });
+  const res = await reply({}, fetch);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).content, '<p>Hi</p>');
+  assert.equal(
+    calls.filter(({ key }) => key === 'POST /posts/reply').length,
+    1,
+  );
+});

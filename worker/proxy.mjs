@@ -12,6 +12,7 @@ import {
   toNotification,
   toStatus,
   toThreadStatus,
+  unsupportedPostOption,
   wantsMentions,
 } from './mapper.mjs';
 
@@ -155,13 +156,41 @@ const escapeHtml = (text) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c],
   );
 
+// Once published, this must not fail: Phanpy resends failed posts, so an error
+// would publish a duplicate.
+async function readBackReply(client, token, parentId, known, response, text) {
+  try {
+    const items = await conversation(client, parentId);
+    const created = findNewReply(items, known);
+    if (created) return toThreadStatus(items, created.id, STATUS_OPTIONS);
+  } catch (error) {
+    console.error(`Reading back a reply failed: ${error.message}`);
+  }
+  let author = {};
+  try {
+    const { display_name: name, avatar, username } = await verifyCredentials(
+      client,
+      token,
+    );
+    author = { name, avatar, _microblog: { username } };
+  } catch (error) {
+    console.error(`Reading the reply's author failed: ${error.message}`);
+  }
+  return toStatus({
+    id: String(response.id ?? `pending-${Date.now()}`),
+    content_html: `<p>${escapeHtml(text)}</p>`,
+    url: '',
+    date_published: new Date().toISOString(),
+    author,
+  });
+}
+
 async function createReply(client, token, fields) {
-  const { status: text, in_reply_to_id: parentId, media_ids: mediaIds } = fields;
+  const { status: text, in_reply_to_id: parentId } = fields;
+  const unsupported = unsupportedPostOption(fields);
+  if (unsupported) return { status: 422, body: { error: unsupported } };
   if (!parentId) {
     return { status: 422, body: { error: 'New posts are not supported yet.' } };
-  }
-  if (mediaIds?.length) {
-    return { status: 422, body: { error: 'Media is not supported yet.' } };
   }
   const known = new Set(
     (await conversation(client, parentId)).map(({ id }) => id),
@@ -171,24 +200,8 @@ async function createReply(client, token, fields) {
     id: parentId,
     content: text,
   });
-  const items = await conversation(client, parentId);
-  const created = findNewReply(items, known);
-  if (created) {
-    return { body: toThreadStatus(items, created.id, STATUS_OPTIONS) };
-  }
-  const {
-    display_name: name,
-    avatar,
-    username,
-  } = await verifyCredentials(client, token);
   return {
-    body: toStatus({
-      id: String(response.id ?? `pending-${Date.now()}`),
-      content_html: `<p>${escapeHtml(text)}</p>`,
-      url: '',
-      date_published: new Date().toISOString(),
-      author: { name, avatar, _microblog: { username } },
-    }),
+    body: await readBackReply(client, token, parentId, known, response, text),
   };
 }
 
