@@ -35,6 +35,12 @@
   display: none !important;
 }
 
+/* Those items are all that follows this divider on your own posts. */
+.szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='mute']),
+.szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='unmute']) {
+  display: none !important;
+}
+
 /*
   Composer: everything published is public, and the proxy refuses these options
   anyway. Media returns when uploads are supported.
