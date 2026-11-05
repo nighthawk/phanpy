@@ -38,10 +38,12 @@ npx wrangler deploy
 ## Known limits
 
 - Thread nesting is inferred from mentions, because Micro.blog has no reply-to data.
-- New posts, media uploads and follows aren't supported yet. Replies are.
 - Everything published is public, because Micro.blog has no private posts. Private
   mentions, followers-only posts, content warnings, polls and scheduling are refused
   rather than sent without them.
+- Replies can't include images, and uploads are limited to JPEG, PNG and GIF.
+- New posts go to the account's default blog, with no way to choose another.
+- Posts can't be edited.
 - Direct messages don't appear, because Micro.blog's API has no route for them.
 - Notifications are mentions only.
 - Search finds people and posts, but not hashtags, and can't look up a post by URL.

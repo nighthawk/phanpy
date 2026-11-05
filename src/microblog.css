@@ -22,33 +22,46 @@
     display: none !important;
   }
 
-  /*
-    Post and profile menus: muting, blocking, reporting and pinning aren't supported.
-    Deleting returns when the proxy supports it.
-  */
+  /* Post and profile menus: muting, blocking, reporting and pinning aren't supported. */
   .szh-menu__item:has(.icon[data-icon='mute']),
   .szh-menu__item:has(.icon[data-icon='unmute']),
   .szh-menu__item:has(.icon[data-icon='block']),
   .szh-menu__item:has(.icon[data-icon='flag']),
   .szh-menu__item:has(.icon[data-icon='pin']),
-  .szh-menu__item:has(.icon[data-icon='unpin']),
-  .szh-menu__item:has(.icon[data-icon='trash']) {
+  .szh-menu__item:has(.icon[data-icon='unpin']) {
     display: none !important;
   }
 
-  /* Those items are all that follows this divider on your own posts. */
-  .szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='mute']),
-  .szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='unmute']) {
+  /* Those items are all that follows this divider, unless Delete comes after them. */
+  .szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='mute']):not(
+      :has(~ .menu-horizontal)
+    ),
+  .szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='unmute']):not(
+      :has(~ .menu-horizontal)
+    ) {
     display: none !important;
   }
 
   /*
     Composer: everything published is public, and the proxy refuses these options
-    anyway. Media returns when uploads are supported.
+    anyway. Images stay, except on replies, which only take text.
   */
-  .compose-footer .add-toolbar-button-group > *,
   .compose-footer label:has(select[name='visibility']),
-  .compose-footer label:has(select[name='language']) {
+  .compose-footer label:has(select[name='language']),
+  .compose-footer .toolbar-divider,
+  .compose-footer .gif-picker-button,
+  .compose-footer .toolbar-button:has(.icon[data-icon='alert']),
+  .compose-footer .toolbar-button:has(.icon[data-icon='poll']),
+  .compose-footer .toolbar-button:has(.icon[data-icon='emoji2']),
+  .compose-footer .toolbar-button:has(.icon[data-icon='schedule']),
+  #compose-container:has(.reply-to) .add-toolbar-button-group > *,
+  .szh-menu__item:has(> .icon[data-icon='alert']),
+  .szh-menu__item:has(> .icon[data-icon='poll']),
+  .szh-menu__item:has(> .icon[data-icon='emoji2']),
+  .szh-menu__item:has(> .icon[data-icon='schedule']),
+  .szh-menu__item:has(> .icon-gif),
+  .szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='emoji2']),
+  .szh-menu__divider:has(+ .szh-menu__item .icon[data-icon='schedule']) {
     display: none !important;
   }
 

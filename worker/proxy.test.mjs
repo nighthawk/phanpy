@@ -251,21 +251,6 @@ test('replying returns the created post found in the conversation', async () => 
   assert.equal(sent.get('content'), 'Hi');
 });
 
-test('top-level posts are refused without reaching upstream', async () => {
-  const { fetch, calls } = stubUpstream();
-  const res = await handleProxy(
-    request('/api/v1/statuses', {
-      token: 'tok',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'Hi' }),
-    }),
-    { fetch },
-  );
-  assert.equal(res.status, 422);
-  assert.equal(calls.length, 0);
-});
-
 test('bookmarking returns the post marked as bookmarked', async () => {
   const { fetch, calls } = stubUpstream({
     'POST /posts/bookmarks': {},
@@ -784,4 +769,229 @@ test('the following list pages through its results', async () => {
     ['user4'],
   );
   assert.equal(third.headers.get('Link'), null);
+});
+
+const mine = (id) => post(id, 'me', '<p>Mine</p>', { is_deletable: true });
+
+test('deleting your own post removes it and returns it', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': { items: [mine(12)] },
+    'DELETE /posts/12': {},
+  });
+  const res = await handleProxy(
+    request('/api/v1/statuses/12', { token: 'tok', method: 'DELETE' }),
+    { fetch },
+  );
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).id, '12');
+  assert.ok(calls.some(({ key }) => key === 'DELETE /posts/12'));
+});
+
+test('a post Micro.blog says is not deletable is left alone', async () => {
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': { items: [post(12, 'ann')] },
+  });
+  const res = await handleProxy(
+    request('/api/v1/statuses/12', { token: 'tok', method: 'DELETE' }),
+    { fetch },
+  );
+  assert.equal(res.status, 403);
+  assert.ok(!calls.some(({ key }) => key.startsWith('DELETE')));
+});
+
+test('an id that is not a post in a conversation is left alone', async () => {
+  // A bookmark's own id: DELETE /posts/<id> could remove the wrong thing.
+  const { fetch, calls } = stubUpstream({
+    'GET /posts/conversation': { items: [] },
+    'GET /posts/bookmarks': {
+      items: [{ ...mine(55), url: 'https://aus.social/users/me/statuses/1' }],
+    },
+  });
+  const res = await handleProxy(
+    request('/api/v1/statuses/55', { token: 'tok', method: 'DELETE' }),
+    { fetch },
+  );
+  assert.equal(res.status, 404);
+  assert.ok(!calls.some(({ key }) => key.startsWith('DELETE')));
+});
+
+const newPost = (fields, fetch) =>
+  handleProxy(
+    request('/api/v1/statuses', {
+      token: 'tok',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'Hello', ...fields }),
+    }),
+    { fetch },
+  );
+
+const posted = () =>
+  new Response('', {
+    status: 202,
+    headers: { Location: 'https://me.example/2026/hello.html' },
+  });
+
+const newPostRoutes = (extra = {}) => ({
+  'POST /micropub': posted,
+  'POST /account/verify': { username: 'me' },
+  'GET /posts/me': {
+    author: { name: 'Me' },
+    _microblog: { username: 'me' },
+    items: [
+      { ...mine(30), url: 'https://me.example/2026/hello.html' },
+      mine(29),
+    ],
+  },
+  ...extra,
+});
+
+test('a new post goes through Micropub and comes back from the feed', async () => {
+  const { fetch, calls } = stubUpstream(newPostRoutes());
+  const res = await newPost({ visibility: 'public', language: 'en' }, fetch);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).id, '30');
+  const sent = new URLSearchParams(
+    calls.find(({ key }) => key === 'POST /micropub').init.body,
+  );
+  assert.equal(sent.get('h'), 'entry');
+  assert.equal(sent.get('content'), 'Hello');
+  assert.equal(calls.filter(({ key }) => key === 'POST /micropub').length, 1);
+});
+
+test('a new post the feed has not caught up with still succeeds once', async () => {
+  // Phanpy resends a failed post, so an error here would publish a duplicate.
+  const { fetch, calls } = stubUpstream(
+    newPostRoutes({
+      'GET /posts/me': () => new Response('Down', { status: 500 }),
+    }),
+  );
+  const res = await newPost({}, fetch);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.url, 'https://me.example/2026/hello.html');
+  assert.equal(body.content, '<p>Hello</p>');
+  assert.equal(calls.filter(({ key }) => key === 'POST /micropub').length, 1);
+});
+
+test('a rejected new post reports failure', async () => {
+  const { fetch } = stubUpstream({
+    'POST /micropub': () => new Response('Nope', { status: 400 }),
+  });
+  const res = await newPost({}, fetch);
+  assert.equal(res.status, 400);
+});
+
+test('privacy options are still refused for new posts', async () => {
+  const { fetch, calls } = stubUpstream(newPostRoutes());
+  const res = await newPost({ visibility: 'direct' }, fetch);
+  assert.equal(res.status, 422);
+  assert.equal(calls.length, 0);
+});
+
+const uploadImage = (fetch, description = 'A pumpkin') => {
+  const form = new FormData();
+  form.set('file', new File(['img'], 'a.png', { type: 'image/png' }));
+  if (description) form.set('description', description);
+  return handleProxy(
+    request('/api/v2/media', { token: 'tok', method: 'POST', body: form }),
+    { fetch },
+  );
+};
+
+const uploaded = () =>
+  new Response('', {
+    status: 202,
+    headers: { Location: 'https://me.example/uploads/a.png' },
+  });
+
+test('uploading sends the file to Micro.blog and returns its URL', async () => {
+  const { fetch, calls } = stubUpstream({ 'POST /micropub/media': uploaded });
+  const res = await uploadImage(fetch);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'image');
+  assert.equal(body.url, 'https://me.example/uploads/a.png');
+  assert.equal(body.description, 'A pumpkin');
+  assert.ok(body.id);
+  const sent = calls[0].init.body;
+  assert.ok(sent instanceof FormData);
+  assert.equal(sent.get('file').name, 'a.png');
+});
+
+test('uploads that are not images are refused without reaching Micro.blog', async () => {
+  const { fetch, calls } = stubUpstream({ 'POST /micropub/media': uploaded });
+  const form = new FormData();
+  form.set('file', new File(['x'], 'a.mp4', { type: 'video/mp4' }));
+  const res = await handleProxy(
+    request('/api/v2/media', { token: 'tok', method: 'POST', body: form }),
+    { fetch },
+  );
+  assert.equal(res.status, 422);
+  assert.equal(calls.length, 0);
+});
+
+test('a new post with images sends each one with its alt text', async () => {
+  const { fetch, calls } = stubUpstream({
+    'POST /micropub/media': uploaded,
+    ...newPostRoutes(),
+  });
+  const { id } = await (await uploadImage(fetch)).json();
+  const res = await newPost({ media_ids: [id, id] }, fetch);
+  assert.equal(res.status, 200);
+  const sent = new URLSearchParams(
+    calls.find(({ key }) => key === 'POST /micropub').init.body,
+  );
+  assert.deepEqual(sent.getAll('photo[]'), [
+    'https://me.example/uploads/a.png',
+    'https://me.example/uploads/a.png',
+  ]);
+  assert.deepEqual(sent.getAll('mp-photo-alt[]'), ['A pumpkin', 'A pumpkin']);
+});
+
+test('an image attached to a reply is refused, because replies take only text', async () => {
+  const { fetch, calls } = stubUpstream({ 'POST /micropub/media': uploaded });
+  const { id } = await (await uploadImage(fetch)).json();
+  calls.length = 0;
+  const res = await newPost({ media_ids: [id], in_reply_to_id: '1' }, fetch);
+  assert.equal(res.status, 422);
+  assert.equal(calls.length, 0);
+});
+
+test('a media id that was not issued here is refused', async () => {
+  const { fetch, calls } = stubUpstream(newPostRoutes());
+  const res = await newPost({ media_ids: ['not-a-real-id'] }, fetch);
+  assert.equal(res.status, 422);
+  assert.equal(calls.length, 0);
+});
+
+test('following someone asks Micro.blog and reports the new state', async () => {
+  const { fetch, calls } = stubUpstream({
+    'POST /users/follow': {},
+    'GET /users/is_following': { is_following: true },
+  });
+  const res = await handleProxy(
+    request('/api/v1/accounts/dajb%40social.coop/follow', {
+      token: 'tok',
+      method: 'POST',
+    }),
+    { fetch },
+  );
+  const body = await res.json();
+  assert.equal(body.following, true);
+  assert.equal(body.id, 'dajb@social.coop');
+  assert.equal(
+    new URLSearchParams(calls[0].init.body).get('username'),
+    'dajb@social.coop',
+  );
+});
+
+test('unfollowing someone asks Micro.blog and reports the new state', async () => {
+  const { fetch, calls } = stubUpstream({ 'POST /users/unfollow': {} });
+  const res = await handleProxy(
+    request('/api/v1/accounts/ann/unfollow', { token: 'tok', method: 'POST' }),
+    { fetch },
+  );
+  assert.equal((await res.json()).following, false);
+  assert.equal(calls[0].key, 'POST /users/unfollow');
 });

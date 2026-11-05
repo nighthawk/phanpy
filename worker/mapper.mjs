@@ -246,6 +246,8 @@ const HARMLESS_POST_FIELDS = new Set([
   'in_reply_to_id',
   'language',
   'quote_approval_policy',
+  // Checked separately, because only new posts can carry images.
+  'media_ids',
 ]);
 
 const isEmpty = (value) =>
@@ -268,4 +270,29 @@ export function unsupportedPostOption(fields) {
       return `Not sent: ${name} isn't supported on Micro.blog.`;
   }
   return null;
+}
+
+// Uploading and posting are separate requests and the Worker keeps nothing between
+// them, so a media id carries what the post will need.
+const MEDIA_ID_PREFIX = 'mb1.';
+
+export function encodeMediaId(url, description) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ url, description }));
+  const binary = String.fromCharCode(...bytes);
+  return MEDIA_ID_PREFIX + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+export function decodeMediaId(id) {
+  if (typeof id !== 'string' || !id.startsWith(MEDIA_ID_PREFIX)) return null;
+  try {
+    const base64 = id
+      .slice(MEDIA_ID_PREFIX.length)
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const { url, description } = JSON.parse(new TextDecoder().decode(bytes));
+    return url?.startsWith('https://') ? { url, description } : null;
+  } catch {
+    return null;
+  }
 }

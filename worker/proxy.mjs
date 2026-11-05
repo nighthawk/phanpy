@@ -3,6 +3,8 @@
 // Never log tokens, sign-in codes or query strings here.
 import {
   bookmarkPostId,
+  decodeMediaId,
+  encodeMediaId,
   findNewReply,
   pageItems,
   paginationLink,
@@ -18,6 +20,7 @@ import {
 
 const UPSTREAM = 'https://micro.blog';
 const MAX_PROFILE_COUNT = 200;
+const SUPPORTED_MEDIA = ['image/jpeg', 'image/png', 'image/gif'];
 const STATUS_OPTIONS = { extractImages: true };
 const WELL_KNOWN = new Set([
   '/.well-known/nodeinfo',
@@ -34,7 +37,7 @@ class UpstreamError extends Error {
 }
 
 function makeClient(fetch, token) {
-  const call = async (path, init = {}) => {
+  const send = async (path, init = {}) => {
     const res = await fetch(`${UPSTREAM}${path}`, {
       ...init,
       headers: {
@@ -43,6 +46,10 @@ function makeClient(fetch, token) {
       },
     });
     if (!res.ok) throw new UpstreamError(res.status, path.split('?')[0]);
+    return res;
+  };
+  const call = async (path, init) => {
+    const res = await send(path, init);
     // Write endpoints aren't documented as returning JSON.
     const text = await res.text();
     try {
@@ -57,7 +64,7 @@ function makeClient(fetch, token) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(fields).toString(),
     });
-  return { call, postForm };
+  return { send, call, postForm };
 }
 
 function feedQuery(params) {
@@ -258,8 +265,25 @@ const escapeHtml = (text) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c],
   );
 
-// Once published, this must not fail: Phanpy resends failed posts, so an error
-// would publish a duplicate.
+// A stand-in for a post that's published but can't be read back yet.
+async function standInStatus(client, token, { id, url, text }) {
+  let username;
+  try {
+    username = await verifiedUsername(client, token);
+  } catch (error) {
+    console.error(`Reading the post's author failed: ${error.message}`);
+  }
+  return toStatus({
+    id: String(id ?? `pending-${Date.now()}`),
+    content_html: `<p>${escapeHtml(text)}</p>`,
+    url: url ?? '',
+    date_published: new Date().toISOString(),
+    author: { name: username, _microblog: { username } },
+  });
+}
+
+// Reading back after publishing must not fail: Phanpy resends failed posts, so an
+// error would publish a duplicate.
 async function readBackReply(client, token, parentId, known, response, text) {
   try {
     const items = await conversation(client, parentId);
@@ -268,33 +292,10 @@ async function readBackReply(client, token, parentId, known, response, text) {
   } catch (error) {
     console.error(`Reading back a reply failed: ${error.message}`);
   }
-  let author = {};
-  try {
-    const {
-      display_name: name,
-      avatar,
-      username,
-    } = await verifyCredentials(client, token);
-    author = { name, avatar, _microblog: { username } };
-  } catch (error) {
-    console.error(`Reading the reply's author failed: ${error.message}`);
-  }
-  return toStatus({
-    id: String(response.id ?? `pending-${Date.now()}`),
-    content_html: `<p>${escapeHtml(text)}</p>`,
-    url: '',
-    date_published: new Date().toISOString(),
-    author,
-  });
+  return standInStatus(client, token, { id: response.id, text });
 }
 
-async function createReply(client, token, fields) {
-  const { status: text, in_reply_to_id: parentId } = fields;
-  const unsupported = unsupportedPostOption(fields);
-  if (unsupported) return { status: 422, body: { error: unsupported } };
-  if (!parentId) {
-    return { status: 422, body: { error: 'New posts are not supported yet.' } };
-  }
+async function createReply(client, token, parentId, text) {
   const known = new Set(
     (await conversation(client, parentId)).map(({ id }) => id),
   );
@@ -307,6 +308,112 @@ async function createReply(client, token, fields) {
     body: await readBackReply(client, token, parentId, known, response, text),
   };
 }
+
+async function readBackPost(client, token, url, text) {
+  try {
+    const username = await verifiedUsername(client, token);
+    const feed = await client.call(`${userPath(username)}?count=5`);
+    const created = feed.items?.find((item) => item.url === url);
+    if (created) return toStatus(created, STATUS_OPTIONS);
+  } catch (error) {
+    console.error(`Reading back a post failed: ${error.message}`);
+  }
+  return standInStatus(client, token, { url, text });
+}
+
+async function createPost(client, token, text, media) {
+  const form = new URLSearchParams({ h: 'entry', content: text ?? '' });
+  for (const { url, description } of media) {
+    form.append('photo[]', url);
+    form.append('mp-photo-alt[]', description ?? '');
+  }
+  const res = await client.send('/micropub', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const url = res.headers.get('Location');
+  return { body: await readBackPost(client, token, url, text ?? '') };
+}
+
+async function createStatus(client, token, fields) {
+  const { status: text, in_reply_to_id: parentId } = fields;
+  const unsupported = unsupportedPostOption(fields);
+  if (unsupported) return { status: 422, body: { error: unsupported } };
+
+  const mediaIds = fields.media_ids ?? [];
+  if (parentId) {
+    if (mediaIds.length) {
+      return {
+        status: 422,
+        body: {
+          error: "Not sent: replies on Micro.blog can't include images.",
+        },
+      };
+    }
+    return createReply(client, token, parentId, text);
+  }
+  const media = mediaIds.map(decodeMediaId);
+  if (media.includes(null)) {
+    return { status: 422, body: { error: 'Not sent: unknown image.' } };
+  }
+  return createPost(client, token, text, media);
+}
+
+// Refuses anything but a post Micro.blog says this user may delete: DELETE /posts/<id>
+// also removes bookmarks and replies, so an id alone isn't enough to go on.
+async function deleteStatus(client, id) {
+  const items = await conversation(client, id);
+  const item = items.find((candidate) => candidate.id === id);
+  if (!item) return { status: 404, body: { error: 'Not found' } };
+  if (!item._microblog?.is_deletable) {
+    return { status: 403, body: { error: "This post can't be deleted." } };
+  }
+  const status = toThreadStatus(items, id, STATUS_OPTIONS);
+  await client.call(`/posts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return { body: status };
+}
+
+async function uploadMedia(client, form) {
+  const file = form.get('file');
+  if (!(file instanceof File) || !SUPPORTED_MEDIA.includes(file.type)) {
+    return {
+      status: 422,
+      body: { error: 'Micro.blog posts here can only include images.' },
+    };
+  }
+  const description = form.get('description') || null;
+  const upstreamForm = new FormData();
+  upstreamForm.set('file', file, file.name);
+  const res = await client.send('/micropub/media', {
+    method: 'POST',
+    body: upstreamForm,
+  });
+  const url = res.headers.get('Location');
+  if (!url) throw new UpstreamError(502, '/micropub/media');
+  return {
+    body: {
+      id: encodeMediaId(url, description),
+      type: 'image',
+      url,
+      preview_url: url,
+      remote_url: null,
+      description,
+      blurhash: null,
+      meta: {},
+    },
+  };
+}
+
+const relationship = (id, following) => ({
+  id,
+  following,
+  followed_by: false,
+  requested: false,
+  blocking: false,
+  muting: false,
+  note: '',
+});
 
 function authorizeRedirect(url) {
   const params = url.searchParams;
@@ -370,8 +477,8 @@ function instanceInfo(host) {
     contact: {},
     configuration: {
       urls: {},
-      statuses: { max_characters: 5000, max_media_attachments: 0 },
-      media_attachments: { supported_mime_types: [] },
+      statuses: { max_characters: 5000, max_media_attachments: 4 },
+      media_attachments: { supported_mime_types: SUPPORTED_MEDIA },
       polls: { max_options: 0 },
     },
   };
@@ -383,6 +490,9 @@ async function route(request, url, fetch, kv) {
   const token =
     request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') || null;
   const client = makeClient(fetch, token);
+  if (pathname === '/api/v2/media' && method === 'POST') {
+    return uploadMedia(client, await request.formData());
+  }
   const fields =
     method === 'POST'
       ? readFields(request.headers.get('Content-Type'), await request.text())
@@ -471,7 +581,7 @@ async function route(request, url, fetch, kv) {
     return feedResponse(client, '/posts/bookmarks', url, bookmarkStatus);
   }
   if (pathname === '/api/v1/statuses' && method === 'POST') {
-    return createReply(client, token, fields);
+    return createStatus(client, token, fields);
   }
   const bookmark = pathname.match(
     /^\/api\/v1\/statuses\/(\d+)\/(un)?bookmark$/,
@@ -485,15 +595,7 @@ async function route(request, url, fetch, kv) {
   if (pathname === '/api/v1/accounts/relationships') {
     const relationships = url.searchParams.getAll('id[]').map(async (id) => {
       const feed = await client.call(`${userPath(id)}?count=1`);
-      return {
-        id,
-        following: Boolean(feed._microblog?.is_following),
-        followed_by: false,
-        requested: false,
-        blocking: false,
-        muting: false,
-        note: '',
-      };
+      return relationship(id, Boolean(feed._microblog?.is_following));
     });
     return { body: await Promise.all(relationships) };
   }
@@ -506,12 +608,24 @@ async function route(request, url, fetch, kv) {
     return profileResponse(client, username, url);
   }
 
+  const follow = pathname.match(/^\/api\/v1\/accounts\/([^/]+)\/(un)?follow$/);
+  if (follow && method === 'POST') {
+    const username = decodeURIComponent(follow[1]);
+    await client.postForm(follow[2] ? '/users/unfollow' : '/users/follow', {
+      username,
+    });
+    return { body: relationship(username, !follow[2]) };
+  }
+
   const following = pathname.match(/^\/api\/v1\/accounts\/([^/]+)\/following$/);
   if (following) {
     return followingResponse(client, decodeURIComponent(following[1]), url);
   }
 
   const status = pathname.match(/^\/api\/v1\/statuses\/(\d+)(\/context)?$/);
+  if (status && !status[2] && method === 'DELETE') {
+    return deleteStatus(client, status[1]);
+  }
   if (status && method === 'GET') {
     if (status[2]) {
       const items = await conversation(client, status[1]);
